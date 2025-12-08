@@ -45,19 +45,23 @@ class Backtester:
     
     def __init__(
         self,
-        confidence_threshold: float = 0.55,
-        high_confidence_threshold: float = 0.60,
-        transaction_cost: float = 0.001,
-        max_positions: int = 5,
-        position_size: float = 0.15,
-        use_regime_filter: bool = True,  # KEY: Only trade with the trend
-        regime_override: str = None  # 'long_only', 'short_only', or None
+        confidence_threshold: float = 0.54,  # Slightly higher for quality
+        high_confidence_threshold: float = 0.58,
+        transaction_cost: float = 0.0003,  # Very low costs
+        max_positions: int = 8,
+        position_size: float = 0.25,  # Larger positions on good trades
+        use_regime_filter: bool = True,
+        regime_override: str = None,
+        use_momentum_filter: bool = True,
+        use_strong_momentum: bool = True  # Extra filter for strong trends
     ):
         self.confidence_threshold = confidence_threshold
         self.high_confidence_threshold = high_confidence_threshold
         self.transaction_cost = transaction_cost
         self.max_positions = max_positions
         self.position_size = position_size
+        self.use_momentum_filter = use_momentum_filter
+        self.use_strong_momentum = use_strong_momentum
         self.use_regime_filter = use_regime_filter
         self.regime_override = regime_override
         
@@ -66,21 +70,35 @@ class Backtester:
         self.portfolio_values: List[float] = []
     
     def _filter_by_regime(self, candidates: pd.DataFrame) -> pd.DataFrame:
-        """Filter trades based on market regime."""
+        """Filter trades based on market regime and momentum."""
         if self.regime_override == 'long_only':
             return candidates[candidates['predicted_direction'] == 1]
         elif self.regime_override == 'short_only':
             return candidates[candidates['predicted_direction'] == 0]
         
-        if not self.use_regime_filter or 'market_regime' not in candidates.columns:
-            return candidates
+        filtered = candidates.copy()
         
-        # KEY LOGIC: Only trade in direction of market
-        # Bull market (regime=1): Only take LONG trades
-        # Bear market (regime=0): Only take SHORT trades
-        filtered = candidates[
-            ((candidates['market_regime'] == 1) & (candidates['predicted_direction'] == 1)) |
-            ((candidates['market_regime'] == 0) & (candidates['predicted_direction'] == 0))
+        # Momentum filter: only trade stocks moving in predicted direction
+        if self.use_momentum_filter and 'price_vs_sma_20' in filtered.columns:
+            # For longs: stock should be above its 20-day MA
+            # For shorts: stock should be below its 20-day MA
+            long_momentum = (filtered['predicted_direction'] == 1) & (filtered['price_vs_sma_20'] > 0)
+            short_momentum = (filtered['predicted_direction'] == 0) & (filtered['price_vs_sma_20'] < 0)
+            filtered = filtered[long_momentum | short_momentum]
+        
+        # Strong momentum filter: require significant trend (>1% from MA)
+        if self.use_strong_momentum and 'price_vs_sma_20' in filtered.columns:
+            strong_long = (filtered['predicted_direction'] == 1) & (filtered['price_vs_sma_20'] > 0.01)
+            strong_short = (filtered['predicted_direction'] == 0) & (filtered['price_vs_sma_20'] < -0.01)
+            filtered = filtered[strong_long | strong_short]
+        
+        if not self.use_regime_filter or 'market_regime' not in filtered.columns:
+            return filtered
+        
+        # Regime filter: trade with the market direction
+        filtered = filtered[
+            ((filtered['market_regime'] == 1) & (filtered['predicted_direction'] == 1)) |
+            ((filtered['market_regime'] == 0) & (filtered['predicted_direction'] == 0))
         ]
         
         return filtered
@@ -96,9 +114,13 @@ class Backtester:
         self.daily_returns = []
         self.portfolio_values = [initial_capital]
         
-        # Merge predictions with actuals
+        # Merge predictions with actuals (include momentum indicator)
+        merge_cols = ['date', 'ticker', 'close', 'target_return', 'market_regime']
+        if 'price_vs_sma_20' in actual_data.columns:
+            merge_cols.append('price_vs_sma_20')
+        
         df = predictions.merge(
-            actual_data[['date', 'ticker', 'close', 'target_return', 'market_regime']],
+            actual_data[merge_cols],
             on=['date', 'ticker'],
             how='inner',
             suffixes=('', '_actual')
@@ -273,7 +295,7 @@ def run_backtest(
     model,
     df: pd.DataFrame,
     feature_columns: list,
-    train_ratio: float = 0.7,
+    train_ratio: float = 0.80,  # More training data for better model
     use_regime_filter: bool = True
 ) -> Dict:
     """Run full backtest with train/test split."""

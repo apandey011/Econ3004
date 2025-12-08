@@ -86,7 +86,7 @@ def run_pipeline(skip_fetch: bool = False, use_regime_filter: bool = True):
         model=model,
         df=df,
         feature_columns=feature_columns,
-        train_ratio=0.7,
+        train_ratio=0.80,  # More training data for better accuracy
         use_regime_filter=use_regime_filter
     )
     

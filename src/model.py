@@ -41,29 +41,29 @@ class StockPredictor:
     
     def _init_models(self):
         """Initialize ensemble models with regularization."""
-        # XGBoost - strong regularization to prevent overfitting
+        # XGBoost - tuned for better accuracy
         self.models['xgb_reg'] = xgb.XGBRegressor(
-            n_estimators=150,
-            max_depth=4,
-            learning_rate=0.05,
-            subsample=0.7,
-            colsample_bytree=0.7,
-            reg_alpha=0.5,
-            reg_lambda=2.0,
-            min_child_weight=10,
+            n_estimators=200,
+            max_depth=5,
+            learning_rate=0.03,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.3,
+            reg_lambda=1.5,
+            min_child_weight=5,
             random_state=42,
             n_jobs=-1
         )
         
         self.models['xgb_clf'] = xgb.XGBClassifier(
-            n_estimators=150,
-            max_depth=4,
-            learning_rate=0.05,
-            subsample=0.7,
-            colsample_bytree=0.7,
-            reg_alpha=0.5,
-            reg_lambda=2.0,
-            min_child_weight=10,
+            n_estimators=200,
+            max_depth=5,
+            learning_rate=0.03,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.3,
+            reg_lambda=1.5,
+            min_child_weight=5,
             random_state=42,
             n_jobs=-1
         )
