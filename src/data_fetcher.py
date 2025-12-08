@@ -156,15 +156,15 @@ def fetch_multiple_stocks(
     full: bool = False
 ) -> pd.DataFrame:
     """
-    Fetch historical data for multiple stocks.
+    Fetch historical data for multiple stocks using batch download (fast!).
     
     Args:
         tickers: List of stock symbols. If None, uses SP500 sample.
         start_date: Start date in 'YYYY-MM-DD' format
         end_date: End date in 'YYYY-MM-DD' format
         period: Alternative to dates - '1y', '2y', '5y', 'max'
-        delay: Delay between requests (be nice to the API)
-        full: If True, fetch all ~400 S&P 500 stocks (slower)
+        delay: Not used (kept for compatibility)
+        full: If True, fetch all ~400 S&P 500 stocks
     
     Returns:
         Combined DataFrame with all stock data
@@ -172,14 +172,38 @@ def fetch_multiple_stocks(
     if tickers is None:
         tickers = get_sp500_tickers(full=full)
     
-    all_data = []
+    print(f"Fetching data for {len(tickers)} stocks (batch download)...")
     
-    print(f"Fetching data for {len(tickers)} stocks...")
-    for ticker in tqdm(tickers, desc="Downloading"):
-        df = fetch_stock_data(ticker, start_date, end_date, period)
-        if df is not None:
-            all_data.append(df)
-        time.sleep(delay)  # Rate limiting
+    # Use yfinance batch download - MUCH faster!
+    df = yf.download(
+        tickers=tickers,
+        period=period,
+        group_by='ticker',
+        auto_adjust=True,
+        threads=True,  # Parallel downloads
+        progress=True
+    )
+    
+    if df.empty:
+        raise ValueError("No data was fetched successfully")
+    
+    # Reshape from wide to long format
+    all_data = []
+    for ticker in tickers:
+        try:
+            if ticker in df.columns.get_level_values(0):
+                ticker_df = df[ticker].copy()
+                ticker_df = ticker_df.reset_index()
+                ticker_df.columns = [col.lower().replace(' ', '_') for col in ticker_df.columns]
+                ticker_df['ticker'] = ticker
+                if 'date' not in ticker_df.columns and 'index' in ticker_df.columns:
+                    ticker_df = ticker_df.rename(columns={'index': 'date'})
+                ticker_df['date'] = pd.to_datetime(ticker_df['date']).dt.tz_localize(None)
+                ticker_df = ticker_df.dropna(subset=['close'])
+                if len(ticker_df) > 0:
+                    all_data.append(ticker_df)
+        except Exception:
+            pass  # Skip failed tickers silently
     
     if not all_data:
         raise ValueError("No data was fetched successfully")
