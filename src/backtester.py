@@ -1,17 +1,16 @@
 """
 Backtesting Engine
-Evaluates the model's performance on historical data.
+Evaluates model performance with market regime-aware trading.
 
-Metrics:
-- Total return vs baseline (buy & hold)
-- Sharpe ratio
-- Max drawdown
-- Win rate
-- Average trade returns
+Key feature: Only trades in the direction of the market regime
+- Bull market (market_regime=1): Only LONG trades
+- Bear market (market_regime=0): Only SHORT trades
+
+This prevents fighting the trend, which is the #1 killer of short-term strategies.
 """
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -24,54 +23,67 @@ class Trade:
     exit_date: datetime
     entry_price: float
     exit_price: float
-    direction: str  # 'long' or 'short'
+    direction: str
     predicted_return: float
     confidence: float
     actual_return: float
+    position_size: float
+    market_regime: int
     
     @property
     def pnl_pct(self) -> float:
-        """Profit/loss percentage."""
         if self.direction == 'long':
             return (self.exit_price - self.entry_price) / self.entry_price
-        else:  # short
+        else:
             return (self.entry_price - self.exit_price) / self.entry_price
 
 
 class Backtester:
     """
-    Backtesting engine for stock predictions.
-    
-    Strategy:
-    - If model predicts UP with high confidence: go LONG
-    - If model predicts DOWN with high confidence: go SHORT
-    - If confidence is low: stay OUT
+    Backtester with market regime-aware trading.
     """
     
     def __init__(
         self,
         confidence_threshold: float = 0.55,
-        transaction_cost: float = 0.001,  # 0.1% per trade
-        max_positions: int = 10,
-        position_size: float = 0.1  # 10% of portfolio per position
+        high_confidence_threshold: float = 0.60,
+        transaction_cost: float = 0.001,
+        max_positions: int = 5,
+        position_size: float = 0.15,
+        use_regime_filter: bool = True,  # KEY: Only trade with the trend
+        regime_override: str = None  # 'long_only', 'short_only', or None
     ):
-        """
-        Initialize backtester.
-        
-        Args:
-            confidence_threshold: Minimum confidence to take a trade
-            transaction_cost: Cost per trade as decimal
-            max_positions: Maximum simultaneous positions
-            position_size: Fraction of portfolio per position
-        """
         self.confidence_threshold = confidence_threshold
+        self.high_confidence_threshold = high_confidence_threshold
         self.transaction_cost = transaction_cost
         self.max_positions = max_positions
         self.position_size = position_size
+        self.use_regime_filter = use_regime_filter
+        self.regime_override = regime_override
         
         self.trades: List[Trade] = []
         self.daily_returns: List[float] = []
         self.portfolio_values: List[float] = []
+    
+    def _filter_by_regime(self, candidates: pd.DataFrame) -> pd.DataFrame:
+        """Filter trades based on market regime."""
+        if self.regime_override == 'long_only':
+            return candidates[candidates['predicted_direction'] == 1]
+        elif self.regime_override == 'short_only':
+            return candidates[candidates['predicted_direction'] == 0]
+        
+        if not self.use_regime_filter or 'market_regime' not in candidates.columns:
+            return candidates
+        
+        # KEY LOGIC: Only trade in direction of market
+        # Bull market (regime=1): Only take LONG trades
+        # Bear market (regime=0): Only take SHORT trades
+        filtered = candidates[
+            ((candidates['market_regime'] == 1) & (candidates['predicted_direction'] == 1)) |
+            ((candidates['market_regime'] == 0) & (candidates['predicted_direction'] == 0))
+        ]
+        
+        return filtered
     
     def run(
         self,
@@ -79,27 +91,14 @@ class Backtester:
         actual_data: pd.DataFrame,
         initial_capital: float = 100000
     ) -> Dict:
-        """
-        Run backtest on predictions.
-        
-        Args:
-            predictions: DataFrame with model predictions
-                Required columns: date, ticker, predicted_return, 
-                predicted_direction, confidence
-            actual_data: DataFrame with actual prices and returns
-                Required columns: date, ticker, close, target_return
-            initial_capital: Starting portfolio value
-            
-        Returns:
-            Dictionary with backtest results
-        """
+        """Run backtest."""
         self.trades = []
         self.daily_returns = []
         self.portfolio_values = [initial_capital]
         
-        # Merge predictions with actual data
+        # Merge predictions with actuals
         df = predictions.merge(
-            actual_data[['date', 'ticker', 'close', 'target_return']],
+            actual_data[['date', 'ticker', 'close', 'target_return', 'market_regime']],
             on=['date', 'ticker'],
             how='inner',
             suffixes=('', '_actual')
@@ -107,50 +106,47 @@ class Backtester:
         
         if 'close_actual' in df.columns:
             df['close'] = df['close_actual']
+        if 'market_regime_actual' in df.columns:
+            df['market_regime'] = df['market_regime_actual']
         
-        # Sort by date
         df = df.sort_values('date').reset_index(drop=True)
-        
-        # Get unique dates
         dates = df['date'].unique()
         
         portfolio_value = initial_capital
         
-        for i, date in enumerate(dates[:-1]):  # Exclude last date (no next day)
+        for i, date in enumerate(dates[:-1]):
             day_data = df[df['date'] == date]
             next_date = dates[i + 1]
             
-            # Select trades based on confidence
-            high_conf = day_data[day_data['confidence'] >= self.confidence_threshold]
+            # Filter by confidence
+            candidates = day_data[day_data['confidence'] >= self.confidence_threshold].copy()
             
-            if len(high_conf) == 0:
+            # Filter by market regime (KEY IMPROVEMENT)
+            candidates = self._filter_by_regime(candidates)
+            
+            if len(candidates) == 0:
                 self.daily_returns.append(0)
                 self.portfolio_values.append(portfolio_value)
                 continue
             
             # Sort by confidence, take top positions
-            high_conf = high_conf.nlargest(self.max_positions, 'confidence')
+            candidates = candidates.nlargest(self.max_positions, 'confidence')
             
-            day_return = 0
-            n_trades = len(high_conf)
-            trade_size = self.position_size * portfolio_value
+            day_pnl = 0
+            n_trades = len(candidates)
             
-            for _, row in high_conf.iterrows():
+            for _, row in candidates.iterrows():
                 direction = 'long' if row['predicted_direction'] == 1 else 'short'
                 actual_return = row['target_return'] if not pd.isna(row['target_return']) else 0
                 
-                # Adjust for direction
                 if direction == 'short':
-                    trade_return = -actual_return  # Short profits when stock falls
+                    trade_return = -actual_return
                 else:
                     trade_return = actual_return
                 
-                # Apply transaction cost
                 trade_return -= self.transaction_cost
+                day_pnl += trade_return / n_trades
                 
-                day_return += trade_return / n_trades
-                
-                # Record trade
                 self.trades.append(Trade(
                     ticker=row['ticker'],
                     entry_date=date,
@@ -160,42 +156,37 @@ class Backtester:
                     direction=direction,
                     predicted_return=row['predicted_return'],
                     confidence=row['confidence'],
-                    actual_return=actual_return
+                    actual_return=actual_return,
+                    position_size=self.position_size,
+                    market_regime=row.get('market_regime', -1)
                 ))
             
-            # Update portfolio
-            portfolio_value *= (1 + day_return * self.position_size * n_trades)
-            self.daily_returns.append(day_return)
+            portfolio_value *= (1 + day_pnl * self.position_size * n_trades)
+            self.daily_returns.append(day_pnl)
             self.portfolio_values.append(portfolio_value)
         
         return self._calculate_metrics(initial_capital, actual_data)
     
-    def _calculate_metrics(
-        self,
-        initial_capital: float,
-        actual_data: pd.DataFrame
-    ) -> Dict:
+    def _calculate_metrics(self, initial_capital: float, actual_data: pd.DataFrame) -> Dict:
         """Calculate performance metrics."""
-        
         if not self.trades:
-            return {
-                'total_return': 0,
-                'sharpe_ratio': 0,
-                'max_drawdown': 0,
-                'win_rate': 0,
-                'total_trades': 0,
-                'error': 'No trades executed'
-            }
+            return {'total_return': 0, 'error': 'No trades executed'}
         
-        # Returns
         total_return = (self.portfolio_values[-1] - initial_capital) / initial_capital
         daily_returns = np.array(self.daily_returns)
         
-        # Sharpe Ratio (annualized, assuming 252 trading days)
+        # Sharpe Ratio
         if len(daily_returns) > 1 and np.std(daily_returns) > 0:
             sharpe_ratio = np.sqrt(252) * np.mean(daily_returns) / np.std(daily_returns)
         else:
             sharpe_ratio = 0
+        
+        # Sortino Ratio
+        negative_returns = daily_returns[daily_returns < 0]
+        if len(negative_returns) > 0:
+            sortino_ratio = np.sqrt(252) * np.mean(daily_returns) / (np.std(negative_returns) + 1e-8)
+        else:
+            sortino_ratio = sharpe_ratio
         
         # Max Drawdown
         portfolio_values = np.array(self.portfolio_values)
@@ -203,163 +194,142 @@ class Backtester:
         drawdown = (peak - portfolio_values) / peak
         max_drawdown = np.max(drawdown)
         
-        # Win Rate
+        # Win rates
         winning_trades = sum(1 for t in self.trades if t.pnl_pct > 0)
-        win_rate = winning_trades / len(self.trades) if self.trades else 0
+        win_rate = winning_trades / len(self.trades)
         
-        # Trade Statistics
-        trade_returns = [t.pnl_pct for t in self.trades]
-        avg_trade_return = np.mean(trade_returns)
-        
-        # Direction Accuracy
+        # Direction accuracy
         correct_direction = sum(
-            1 for t in self.trades 
+            1 for t in self.trades
             if (t.direction == 'long' and t.actual_return > 0) or
                (t.direction == 'short' and t.actual_return < 0)
         )
-        direction_accuracy = correct_direction / len(self.trades) if self.trades else 0
+        direction_accuracy = correct_direction / len(self.trades)
         
-        # Baseline: Buy and hold S&P (using average of all stocks)
-        baseline_return = actual_data.groupby('date')['target_return'].mean().sum()
-        
-        # Long-only trades performance
+        # Long vs Short
         long_trades = [t for t in self.trades if t.direction == 'long']
         short_trades = [t for t in self.trades if t.direction == 'short']
+        
+        long_accuracy = sum(1 for t in long_trades if t.pnl_pct > 0) / max(len(long_trades), 1)
+        short_accuracy = sum(1 for t in short_trades if t.pnl_pct > 0) / max(len(short_trades), 1)
+        
+        # Baseline
+        baseline_return = actual_data.groupby('date')['target_return'].mean().sum()
+        
+        # Profit factor
+        gross_profit = sum(t.pnl_pct for t in self.trades if t.pnl_pct > 0)
+        gross_loss = abs(sum(t.pnl_pct for t in self.trades if t.pnl_pct < 0))
+        profit_factor = gross_profit / (gross_loss + 1e-8)
+        
+        # High confidence trades
+        high_conf = [t for t in self.trades if t.confidence >= self.high_confidence_threshold]
+        high_conf_accuracy = sum(1 for t in high_conf if t.pnl_pct > 0) / max(len(high_conf), 1)
         
         return {
             'total_return': total_return,
             'total_return_pct': total_return * 100,
-            'annual_return': total_return * (252 / max(len(self.daily_returns), 1)),
             'sharpe_ratio': sharpe_ratio,
+            'sortino_ratio': sortino_ratio,
             'max_drawdown': max_drawdown,
             'max_drawdown_pct': max_drawdown * 100,
             'win_rate': win_rate,
             'win_rate_pct': win_rate * 100,
             'direction_accuracy': direction_accuracy,
             'direction_accuracy_pct': direction_accuracy * 100,
+            'profit_factor': profit_factor,
             'total_trades': len(self.trades),
             'long_trades': len(long_trades),
             'short_trades': len(short_trades),
-            'avg_trade_return': avg_trade_return,
-            'avg_trade_return_pct': avg_trade_return * 100,
+            'long_accuracy_pct': long_accuracy * 100,
+            'short_accuracy_pct': short_accuracy * 100,
+            'high_conf_trades': len(high_conf),
+            'high_conf_accuracy_pct': high_conf_accuracy * 100,
+            'avg_trade_return_pct': np.mean([t.pnl_pct for t in self.trades]) * 100,
             'baseline_return': baseline_return,
             'baseline_return_pct': baseline_return * 100,
             'alpha': total_return - baseline_return,
             'alpha_pct': (total_return - baseline_return) * 100,
             'final_portfolio_value': self.portfolio_values[-1],
-            'prediction_mae': np.mean([
-                abs(t.predicted_return - t.actual_return) for t in self.trades
-            ])
+            'prediction_mae': np.mean([abs(t.predicted_return - t.actual_return) for t in self.trades])
         }
     
     def get_trade_history(self) -> pd.DataFrame:
-        """Get detailed trade history as DataFrame."""
+        """Get trade history as DataFrame."""
         if not self.trades:
             return pd.DataFrame()
         
         return pd.DataFrame([{
             'ticker': t.ticker,
             'entry_date': t.entry_date,
-            'exit_date': t.exit_date,
-            'entry_price': t.entry_price,
-            'exit_price': t.exit_price,
             'direction': t.direction,
-            'predicted_return': t.predicted_return,
-            'actual_return': t.actual_return,
             'confidence': t.confidence,
-            'pnl_pct': t.pnl_pct
+            'actual_return': t.actual_return,
+            'pnl_pct': t.pnl_pct,
+            'market_regime': t.market_regime
         } for t in self.trades])
-    
-    def get_equity_curve(self) -> pd.DataFrame:
-        """Get portfolio value over time."""
-        return pd.DataFrame({
-            'portfolio_value': self.portfolio_values
-        })
 
 
-def run_full_backtest(
+def run_backtest(
     model,
     df: pd.DataFrame,
     feature_columns: list,
-    train_ratio: float = 0.8,
-    confidence_threshold: float = 0.55
+    train_ratio: float = 0.7,
+    use_regime_filter: bool = True
 ) -> Dict:
-    """
-    Run a full train-test backtest.
-    
-    Args:
-        model: Trained StockPredictor model
-        df: Full dataset with features
-        feature_columns: List of feature columns
-        train_ratio: Fraction of data for training
-        confidence_threshold: Min confidence for trades
-        
-    Returns:
-        Backtest results dictionary
-    """
-    # Sort by date
+    """Run full backtest with train/test split."""
     df_sorted = df.sort_values('date').reset_index(drop=True)
     
-    # Split data
     split_idx = int(len(df_sorted) * train_ratio)
     train_df = df_sorted.iloc[:split_idx]
     test_df = df_sorted.iloc[split_idx:]
     
-    print(f"Training on {len(train_df)} samples, testing on {len(test_df)} samples")
-    print(f"Train period: {train_df['date'].min()} to {train_df['date'].max()}")
-    print(f"Test period: {test_df['date'].min()} to {test_df['date'].max()}")
+    print(f"Training: {len(train_df)} samples ({train_df['date'].min().date()} to {train_df['date'].max().date()})")
+    print(f"Testing: {len(test_df)} samples ({test_df['date'].min().date()} to {test_df['date'].max().date()})")
     
-    # Train model
     model.fit(train_df, feature_columns)
-    
-    # Get predictions on test set
     predictions = model.predict(test_df)
     
-    # Run backtest
-    backtester = Backtester(confidence_threshold=confidence_threshold)
-    results = backtester.run(predictions, test_df)
+    backtester = Backtester(use_regime_filter=use_regime_filter)
+    metrics = backtester.run(predictions, test_df)
     
     return {
-        'metrics': results,
+        'metrics': metrics,
         'trade_history': backtester.get_trade_history(),
-        'equity_curve': backtester.get_equity_curve(),
         'predictions': predictions
     }
 
 
-def print_backtest_results(results: Dict):
-    """Pretty print backtest results."""
-    metrics = results['metrics']
+def print_results(results: Dict):
+    """Print backtest results."""
+    m = results['metrics']
     
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("BACKTEST RESULTS")
-    print("="*60)
+    print("="*70)
     
     print(f"\n📈 RETURNS")
-    print(f"  Total Return: {metrics['total_return_pct']:.2f}%")
-    print(f"  Baseline (Buy & Hold): {metrics['baseline_return_pct']:.2f}%")
-    print(f"  Alpha (Excess Return): {metrics['alpha_pct']:.2f}%")
+    print(f"  Strategy: {m['total_return_pct']:+.2f}%")
+    print(f"  Baseline: {m['baseline_return_pct']:+.2f}%")
+    print(f"  Alpha: {m['alpha_pct']:+.2f}%")
     
-    print(f"\n📊 RISK METRICS")
-    print(f"  Sharpe Ratio: {metrics['sharpe_ratio']:.3f}")
-    print(f"  Max Drawdown: {metrics['max_drawdown_pct']:.2f}%")
+    print(f"\n📊 RISK")
+    print(f"  Sharpe Ratio: {m['sharpe_ratio']:.3f}")
+    print(f"  Sortino Ratio: {m['sortino_ratio']:.3f}")
+    print(f"  Max Drawdown: {m['max_drawdown_pct']:.2f}%")
+    print(f"  Profit Factor: {m['profit_factor']:.2f}")
     
     print(f"\n🎯 ACCURACY")
-    print(f"  Direction Accuracy: {metrics['direction_accuracy_pct']:.1f}%")
-    print(f"  Win Rate: {metrics['win_rate_pct']:.1f}%")
-    print(f"  Prediction MAE: {metrics['prediction_mae']:.6f}")
+    print(f"  Direction: {m['direction_accuracy_pct']:.1f}%")
+    print(f"  Win Rate: {m['win_rate_pct']:.1f}%")
+    print(f"  Long Accuracy: {m['long_accuracy_pct']:.1f}%")
+    print(f"  Short Accuracy: {m['short_accuracy_pct']:.1f}%")
+    print(f"  High-Conf Accuracy: {m['high_conf_accuracy_pct']:.1f}% ({m['high_conf_trades']} trades)")
     
-    print(f"\n📝 TRADE STATISTICS")
-    print(f"  Total Trades: {metrics['total_trades']}")
-    print(f"  Long Trades: {metrics['long_trades']}")
-    print(f"  Short Trades: {metrics['short_trades']}")
-    print(f"  Avg Trade Return: {metrics['avg_trade_return_pct']:.3f}%")
+    print(f"\n📝 TRADES")
+    print(f"  Total: {m['total_trades']}")
+    print(f"  Long/Short: {m['long_trades']}/{m['short_trades']}")
+    print(f"  Avg Return: {m['avg_trade_return_pct']:+.3f}%")
     
-    print(f"\n💰 FINAL PORTFOLIO")
-    print(f"  Value: ${metrics['final_portfolio_value']:,.2f}")
-    print("="*60)
-
-
-if __name__ == "__main__":
-    print("Backtester module loaded successfully")
+    print(f"\n💰 PORTFOLIO: $100,000 → ${m['final_portfolio_value']:,.2f}")
+    print("="*70)
 

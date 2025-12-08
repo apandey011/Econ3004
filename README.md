@@ -1,209 +1,105 @@
 # S&P 500 Stock Price Prediction Model
 
-A machine learning system for predicting short-term stock price movements for S&P 500 stocks.
+A machine learning system for predicting short-term stock price movements.
 
-## 📋 Project Overview
+## 🎯 Key Features
 
-This model predicts next-day price movements (up/down) and expected returns for stocks in the S&P 500. It uses:
-
-- **Historical price data**: Open, High, Low, Close, Volume
-- **Technical indicators**: Moving averages, RSI, MACD, Bollinger Bands, etc.
-- **Volume analysis**: Relative volume, OBV
-- **Volatility measures**: ATR, historical volatility
-
-### Key Outputs
-
-1. **Prediction**: Will the stock go UP or DOWN tomorrow?
-2. **Confidence Score**: How sure is the model? (0-100%)
-3. **Expected Return**: Predicted percentage change
-4. **Trading Signal**: STRONG BUY, MODERATE BUY, HOLD, MODERATE SELL, STRONG SELL
-5. **Explanation**: Key factors driving the prediction
+- **Ensemble Model**: XGBoost + Random Forest + Linear models
+- **Market Regime Detection**: Only trades WITH the trend (long in bull markets, short in bear)
+- **70+ Technical Indicators**: RSI, MACD, Bollinger Bands, ADX, etc.
+- **Confidence Scoring**: Only takes high-conviction trades
 
 ## 🚀 Quick Start
 
-### 1. Install Dependencies
-
 ```bash
+# Install dependencies
 cd /Users/apandey/Downloads/Econ3004
-pip install -r requirements.txt
-```
+source venv/bin/activate
 
-### 2. Run the Full Pipeline
-
-```bash
+# Run full pipeline (fetch data, train, backtest)
 python main.py
-```
 
-This will:
-1. Fetch 2 years of data for 50 S&P 500 stocks
-2. Engineer 70+ technical features
-3. Train an XGBoost model
-4. Run backtesting with performance metrics
-5. Generate sample predictions with explanations
+# Use cached data (faster)
+python main.py --skip-fetch
 
-### 3. Get a Prediction for a Specific Stock
-
-```bash
-python main.py --predict AAPL
+# Predict any stock
+python predict.py AAPL
+python predict.py AAPL MSFT GOOGL NVDA
 ```
 
 ## 📁 Project Structure
 
 ```
 Econ3004/
-├── main.py                 # Main entry point
-├── requirements.txt        # Python dependencies
-├── README.md              # This file
+├── main.py              # Main pipeline
+├── predict.py           # Quick predictions for any stock
+├── requirements.txt     # Dependencies
+├── README.md
 ├── src/
-│   ├── data_fetcher.py    # Data downloading & cleaning
-│   ├── features.py        # Feature engineering
-│   ├── models.py          # ML models (XGBoost, Ridge, Random Forest)
-│   ├── lstm_model.py      # LSTM neural network
-│   ├── backtester.py      # Backtesting engine
-│   └── visualize.py       # Charts and plots
-├── data/                  # Downloaded stock data
-├── models/                # Saved trained models
-└── plots/                 # Generated visualizations
+│   ├── data_fetcher.py  # Download stock data (Yahoo Finance)
+│   ├── features.py      # Technical indicators & features
+│   ├── model.py         # Ensemble prediction model
+│   └── backtester.py    # Backtesting with regime filter
+├── data/                # Cached stock data
+└── models/              # Trained model files
 ```
 
-## 📊 Features Created
+## 📊 How It Works
 
-### Moving Averages
-- SMA (5, 10, 20, 50 day)
-- EMA (5, 10, 20, 50 day)
-- Price position relative to each MA
+### 1. Data
+- Fetches 2 years of daily OHLCV data for 50 S&P 500 stocks
+- Source: Yahoo Finance (free, no API key needed)
 
-### Momentum Indicators
-- RSI (7 and 14 period)
-- MACD (line, signal, histogram)
-- Stochastic Oscillator
-- Rate of Change (5, 10, 20 day)
+### 2. Features (70+)
+- **Moving Averages**: SMA, EMA (5, 10, 20, 50 day)
+- **Momentum**: RSI, MACD, Stochastic, Williams %R, CCI, ADX
+- **Volatility**: ATR, Bollinger Bands, Historical Vol
+- **Volume**: Relative Volume, OBV
+- **Market-Wide**: Market breadth, regime detection
 
-### Volatility Indicators
-- ATR (Average True Range)
-- Bollinger Bands (upper, lower, width, position)
-- Historical volatility (5, 10, 20 day)
-- Daily range
+### 3. Model
+- **Ensemble**: Combines 3 model types for robust predictions
+- **Regularization**: Prevents overfitting to training data
+- **Feature Selection**: Keeps only the most predictive features
 
-### Volume Indicators
-- Relative volume
-- Volume moving averages
-- On-Balance Volume (OBV)
-- Volume change
+### 4. Trading Strategy
+- **Regime Filter**: Only long in bull markets, short in bear markets
+- **Confidence Threshold**: Only trades above 55% confidence
+- **Position Sizing**: Limits risk per trade
 
-### Price Patterns
-- Candlestick body size
-- Upper/lower shadows
-- Gap up/down
-- Consecutive up/down days
-
-### Lagged Features
-- Lagged returns (1-5 days)
-- Lagged RSI
-- Lagged MACD
-- Lagged volume
-
-## 🎯 Models
-
-### 1. XGBoost (Default)
-- Gradient boosted trees
-- Best for tabular/structured data
-- Fast training and inference
-
-### 2. Random Forest
-- Ensemble of decision trees
-- Good for understanding feature importance
-- Robust to overfitting
-
-### 3. Ridge Regression
-- Linear model with L2 regularization
-- Simple baseline
-- Interpretable coefficients
-
-### 4. LSTM (Advanced)
-- Recurrent neural network
-- Learns sequential patterns
-- Captures temporal dependencies
-
-## 📈 Success Metrics
-
-| Metric | Description | Good Value |
-|--------|-------------|------------|
-| **Direction Accuracy** | % of correct up/down predictions | > 52% |
-| **Sharpe Ratio** | Risk-adjusted return | > 1.0 |
-| **Alpha** | Excess return vs buy & hold | > 0% |
-| **Max Drawdown** | Largest peak-to-trough decline | < 20% |
-| **MAE** | Average prediction error | < 2% |
-
-## 🔧 Usage Options
+## 🔧 Command Options
 
 ```bash
-# Fetch data only (no training)
-python main.py --fetch-only
-
-# Use existing data (skip download)
+# Full pipeline with regime filter (recommended)
 python main.py --skip-fetch
 
-# Specific tickers
-python main.py --tickers AAPL MSFT GOOGL AMZN
-
-# Different time period
-python main.py --period 5y
-
-# Different model
-python main.py --model random_forest
+# Disable regime filter (trade both directions always)
+python main.py --skip-fetch --no-regime
 ```
+
+## 📈 Performance Metrics
+
+| Metric | Description |
+|--------|-------------|
+| **Return** | Total portfolio return |
+| **Alpha** | Return vs buy-and-hold baseline |
+| **Sharpe Ratio** | Risk-adjusted return (>1 is good) |
+| **Sortino Ratio** | Downside risk-adjusted return |
+| **Max Drawdown** | Largest peak-to-trough decline |
+| **Win Rate** | % of profitable trades |
+| **Direction Accuracy** | % of correct up/down predictions |
 
 ## ⚠️ Important Notes
 
-1. **This is not financial advice** - This is an educational project for Econ 3004
-2. **Past performance ≠ future results** - Markets are unpredictable
-3. **Paper trade first** - Test with fake money before risking real capital
-4. **Manage risk** - Never invest more than you can afford to lose
+1. **Not Financial Advice**: This is an educational project
+2. **Past ≠ Future**: Historical performance doesn't guarantee results
+3. **Market Efficiency**: Stock prices are hard to predict (~51% is good!)
+4. **Risk Management**: Never invest more than you can afford to lose
 
-## 🔄 Continuous Improvement
+## 🎓 For Econ 3004
 
-The model can be improved by:
-
-1. **More data sources**: News sentiment, social media, earnings data
-2. **Alternative data**: Satellite imagery, web traffic, credit card data
-3. **Ensemble methods**: Combining multiple models
-4. **Hyperparameter tuning**: Optimize model parameters
-5. **Walk-forward validation**: More rigorous backtesting
-6. **Live paper trading**: Test in real-time market conditions
-
-## 📝 Example Output
-
-```
-============================================================
-PREDICTION FOR AAPL
-============================================================
-Date: 2024-12-06
-Current Price: $243.12
-
-🎯 PREDICTION: UP
-   Expected Return: 0.234%
-   Confidence: 62.4%
-   Probability Up: 62.4%
-   Probability Down: 37.6%
-
-📊 TRADING SIGNAL:
-   Signal: MODERATE BUY
-   Action: Consider a small LONG position
-
-📈 KEY FACTORS:
-   • RSI (54.2): Neutral momentum
-   • Price vs 20-day SMA: +1.23%
-   • 20-day Volatility: 1.42%
-   • Volume: 1.12x average (normal)
-   • MACD: Bullish (histogram = 0.234)
-```
-
-## 👨‍💻 Author
-
-Econ 3004 Final Project
-
----
-
-*Remember: The best prediction is one that helps you make better decisions, not perfect decisions.*
-
+This project demonstrates:
+- Machine learning for financial prediction
+- Time series analysis
+- Backtesting methodology
+- Risk management principles
