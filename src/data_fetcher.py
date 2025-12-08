@@ -11,8 +11,66 @@ from tqdm import tqdm
 import time
 
 
-# Top S&P 500 stocks by market cap (representative sample)
-SP500_SAMPLE = [
+# Full S&P 500 stocks list
+SP500_FULL = [
+    # Technology
+    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'NVDA', 'META', 'AVGO', 'ADBE', 'CRM', 'CSCO',
+    'ACN', 'ORCL', 'AMD', 'INTC', 'IBM', 'QCOM', 'TXN', 'NOW', 'INTU', 'AMAT',
+    'ADI', 'LRCX', 'MU', 'KLAC', 'SNPS', 'CDNS', 'MCHP', 'APH', 'MSI', 'TEL',
+    'FTNT', 'PANW', 'CRWD', 'IT', 'ANSS', 'KEYS', 'CDW', 'FSLR', 'ENPH', 'ON',
+    'MPWR', 'TER', 'SWKS', 'AKAM', 'JNPR', 'NTAP', 'WDC', 'STX', 'HPQ', 'HPE',
+    # Financials
+    'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS', 'BLK', 'SPGI', 'C',
+    'AXP', 'SCHW', 'CB', 'MMC', 'PGR', 'AON', 'CME', 'ICE', 'MCO', 'USB',
+    'PNC', 'TFC', 'AIG', 'MET', 'PRU', 'AFL', 'TRV', 'ALL', 'COF', 'BK',
+    'FITB', 'STT', 'HBAN', 'RF', 'CFG', 'KEY', 'NTRS', 'CINF', 'L', 'RE',
+    'GL', 'AIZ', 'CBOE', 'NDAQ', 'MSCI', 'FDS', 'MKTX', 'IVZ', 'BEN', 'TROW',
+    # Healthcare
+    'UNH', 'JNJ', 'LLY', 'ABBV', 'MRK', 'PFE', 'TMO', 'ABT', 'DHR', 'BMY',
+    'AMGN', 'MDT', 'GILD', 'CVS', 'ELV', 'CI', 'ISRG', 'VRTX', 'REGN', 'SYK',
+    'BSX', 'ZBH', 'BDX', 'HUM', 'CNC', 'MCK', 'CAH', 'DXCM', 'IQV', 'MTD',
+    'A', 'IDXX', 'EW', 'RMD', 'HOLX', 'ALGN', 'BAX', 'BIIB', 'MRNA', 'MOH',
+    'LH', 'DGX', 'CRL', 'TECH', 'HSIC', 'XRAY', 'DVA', 'INCY', 'VTRS', 'OGN',
+    # Consumer
+    'AMZN', 'TSLA', 'HD', 'MCD', 'NKE', 'SBUX', 'TJX', 'LOW', 'BKNG', 'CMG',
+    'ORLY', 'AZO', 'ROST', 'MAR', 'HLT', 'DHI', 'LEN', 'GM', 'F', 'APTV',
+    'GRMN', 'BBY', 'DRI', 'YUM', 'EBAY', 'ETSY', 'ULTA', 'POOL', 'DPZ', 'MGM',
+    'WYNN', 'CZR', 'LVS', 'RCL', 'CCL', 'NCLH', 'HAS', 'NWL', 'WHR', 'MHK',
+    'KMX', 'AN', 'GPC', 'AAP', 'BWA', 'LEA', 'LKQ', 'GNRC', 'PHM', 'NVR',
+    # Consumer Staples
+    'PG', 'KO', 'PEP', 'COST', 'WMT', 'PM', 'MO', 'MDLZ', 'CL', 'KMB',
+    'GIS', 'K', 'HSY', 'SJM', 'CAG', 'CPB', 'HRL', 'MKC', 'TSN', 'KHC',
+    'STZ', 'BF-B', 'TAP', 'ADM', 'BG', 'KR', 'SYY', 'WBA', 'EL', 'CLX',
+    'CHD', 'MNST', 'KDP', 'CTRA', 'KVUE',
+    # Energy
+    'XOM', 'CVX', 'COP', 'EOG', 'SLB', 'MPC', 'PSX', 'VLO', 'PXD', 'OXY',
+    'HES', 'DVN', 'HAL', 'BKR', 'FANG', 'KMI', 'WMB', 'OKE', 'TRGP', 'EQT',
+    'APA', 'MRO', 'CTRA',
+    # Industrials
+    'UPS', 'HON', 'RTX', 'CAT', 'GE', 'BA', 'DE', 'LMT', 'UNP', 'MMM',
+    'NOC', 'GD', 'CSX', 'NSC', 'WM', 'ITW', 'EMR', 'ETN', 'PH', 'ROK',
+    'FDX', 'JCI', 'CMI', 'PCAR', 'CARR', 'OTIS', 'TT', 'AME', 'FAST', 'VRSK',
+    'IR', 'DOV', 'CTAS', 'PAYX', 'CPRT', 'RSG', 'GWW', 'ODFL', 'J', 'PWR',
+    'HII', 'LHX', 'TDG', 'WAB', 'SWK', 'XYL', 'IEX', 'ROP', 'NDSN', 'PNR',
+    # Materials
+    'LIN', 'APD', 'SHW', 'ECL', 'DD', 'NEM', 'FCX', 'NUE', 'VMC', 'MLM',
+    'DOW', 'PPG', 'IP', 'PKG', 'AVY', 'CE', 'ALB', 'EMN', 'FMC', 'CF',
+    'MOS', 'IFF', 'BALL', 'SEE', 'WRK', 'AMCR',
+    # Utilities
+    'NEE', 'DUK', 'SO', 'D', 'AEP', 'EXC', 'SRE', 'XEL', 'PEG', 'ED',
+    'WEC', 'ES', 'AWK', 'DTE', 'EIX', 'FE', 'AEE', 'CMS', 'CNP', 'EVRG',
+    'ATO', 'NI', 'LNT', 'PPL', 'NRG', 'AES', 'CEG', 'VST', 'PNW', 'MGEE',
+    # Real Estate
+    'PLD', 'AMT', 'EQIX', 'CCI', 'PSA', 'O', 'WELL', 'SPG', 'DLR', 'VICI',
+    'AVB', 'EQR', 'VTR', 'ARE', 'MAA', 'UDR', 'ESS', 'EXR', 'INVH', 'KIM',
+    'REG', 'HST', 'PEAK', 'CPT', 'BXP', 'SLG', 'VNO', 'AIV',
+    # Communication
+    'DIS', 'CMCSA', 'NFLX', 'T', 'VZ', 'TMUS', 'CHTR', 'WBD', 'PARA', 'FOX',
+    'FOXA', 'NWS', 'NWSA', 'LYV', 'MTCH', 'IPG', 'OMC',
+]
+
+# Top 50 stocks sample (default - faster)
+SP500_TOP50 = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'UNH', 'JNJ',
     'JPM', 'V', 'PG', 'XOM', 'HD', 'CVX', 'MA', 'ABBV', 'MRK', 'PEP',
     'KO', 'COST', 'AVGO', 'LLY', 'WMT', 'MCD', 'CSCO', 'ACN', 'ABT', 'TMO',
@@ -20,13 +78,22 @@ SP500_SAMPLE = [
     'CMCSA', 'WFC', 'BMY', 'COP', 'ORCL', 'INTC', 'AMD', 'QCOM', 'HON', 'UPS'
 ]
 
+# Default to top 50 (use --500 flag for full list)
+SP500_SAMPLE = SP500_TOP50
 
-def get_sp500_tickers() -> List[str]:
+
+def get_sp500_tickers(full: bool = False) -> List[str]:
     """
-    Get list of S&P 500 ticker symbols.
-    Returns a curated sample of top S&P 500 stocks.
+    Get S&P 500 ticker symbols.
+    
+    Args:
+        full: If True, return all ~400 stocks. If False, return top 50.
     """
-    return SP500_SAMPLE.copy()
+    if full:
+        return SP500_FULL.copy()
+    return SP500_TOP50.copy()
+
+
 
 
 def fetch_stock_data(
@@ -85,7 +152,8 @@ def fetch_multiple_stocks(
     start_date: str = None,
     end_date: str = None,
     period: str = "2y",
-    delay: float = 0.1
+    delay: float = 0.1,
+    full: bool = False
 ) -> pd.DataFrame:
     """
     Fetch historical data for multiple stocks.
@@ -96,12 +164,13 @@ def fetch_multiple_stocks(
         end_date: End date in 'YYYY-MM-DD' format
         period: Alternative to dates - '1y', '2y', '5y', 'max'
         delay: Delay between requests (be nice to the API)
+        full: If True, fetch all ~400 S&P 500 stocks (slower)
     
     Returns:
         Combined DataFrame with all stock data
     """
     if tickers is None:
-        tickers = get_sp500_tickers()
+        tickers = get_sp500_tickers(full=full)
     
     all_data = []
     

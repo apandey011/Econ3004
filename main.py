@@ -39,14 +39,15 @@ def ensure_dirs():
     os.makedirs(MODEL_DIR, exist_ok=True)
 
 
-def run_pipeline(skip_fetch: bool = False, use_regime_filter: bool = True):
+def run_pipeline(skip_fetch: bool = False, use_regime_filter: bool = True, full_sp500: bool = False):
     """Run the full prediction pipeline."""
     ensure_dirs()
     
     print("\n" + "="*70)
     print("S&P 500 STOCK PREDICTION MODEL")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Regime Filter: {'ON (trade WITH the trend)' if use_regime_filter else 'OFF'}")
+    print(f"Stocks: {'All ~400 S&P 500' if full_sp500 else 'Top 50 (use --500 for all)'}")
+    print(f"Regime Filter: {'ON' if use_regime_filter else 'OFF'}")
     print("="*70)
     
     # Step 1: Data
@@ -54,16 +55,19 @@ def run_pipeline(skip_fetch: bool = False, use_regime_filter: bool = True):
     print("STEP 1: DATA")
     print("="*70)
     
-    if skip_fetch and os.path.exists(DATA_FILE):
+    # Use different cache file for full vs sample
+    data_file = DATA_FILE.replace('.csv', '_full.csv') if full_sp500 else DATA_FILE
+    
+    if skip_fetch and os.path.exists(data_file):
         print(f"Loading cached data...")
-        df = load_data(DATA_FILE)
+        df = load_data(data_file)
         df = calculate_returns(df)
     else:
-        print("Fetching fresh data...")
-        df = fetch_multiple_stocks(period="2y")
+        print(f"Fetching {'all S&P 500' if full_sp500 else 'top 50'} stocks...")
+        df = fetch_multiple_stocks(period="2y", full=full_sp500)
         df = clean_data(df)
         df = calculate_returns(df)
-        save_data(df, DATA_FILE)
+        save_data(df, data_file)
     
     print(f"Data: {len(df)} rows, {df['ticker'].nunique()} stocks")
     print(f"Period: {df['date'].min().date()} to {df['date'].max().date()}")
@@ -192,11 +196,13 @@ def main():
     parser = argparse.ArgumentParser(description="S&P 500 Stock Prediction")
     parser.add_argument('--skip-fetch', action='store_true', help='Use cached data')
     parser.add_argument('--no-regime', action='store_true', help='Disable market regime filter')
+    parser.add_argument('--500', dest='full_sp500', action='store_true', help='Use all ~400 S&P 500 stocks (slower)')
     args = parser.parse_args()
     
     run_pipeline(
         skip_fetch=args.skip_fetch,
-        use_regime_filter=not args.no_regime
+        use_regime_filter=not args.no_regime,
+        full_sp500=args.full_sp500
     )
 
 
