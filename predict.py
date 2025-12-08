@@ -12,9 +12,9 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from data_fetcher import fetch_stock_data, clean_data, calculate_returns
-from features import create_all_features, get_feature_columns
-from model import StockPredictor
+from src.data_fetcher import fetch_stock_data, clean_data, calculate_returns
+from src.features import create_all_features, get_feature_columns
+from src.model import StockPredictor
 import pandas as pd
 
 

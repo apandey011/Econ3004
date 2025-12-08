@@ -22,10 +22,10 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from data_fetcher import fetch_multiple_stocks, clean_data, calculate_returns, save_data, load_data
-from features import create_all_features, get_feature_columns
-from model import StockPredictor
-from backtester import run_backtest, print_results, Backtester
+from src.data_fetcher import fetch_multiple_stocks, clean_data, calculate_returns, save_data, load_data
+from src.features import create_all_features, get_feature_columns
+from src.model import StockPredictor
+from src.backtester import run_backtest, print_results, Backtester
 
 
 DATA_DIR = "data"
@@ -76,9 +76,9 @@ def run_pipeline(skip_fetch: bool = False, use_regime_filter: bool = True):
     df = create_all_features(df)
     feature_columns = get_feature_columns(df)
     
-    # Step 3: Backtest
+    # Step 3: Train Model
     print("\n" + "="*70)
-    print("STEP 3: BACKTEST")
+    print("STEP 3: TRAINING MODEL")
     print("="*70)
     
     model = StockPredictor()
@@ -86,32 +86,71 @@ def run_pipeline(skip_fetch: bool = False, use_regime_filter: bool = True):
         model=model,
         df=df,
         feature_columns=feature_columns,
-        train_ratio=0.80,  # More training data for better accuracy
+        train_ratio=0.80,
         use_regime_filter=use_regime_filter
     )
-    
-    print_results(results)
-    
-    # Step 4: Save & show top features
-    print("\n" + "="*70)
-    print("STEP 4: TOP FEATURES")
-    print("="*70)
-    
     model.save(MODEL_FILE)
     
+    # Step 4: Top Features
+    print("\n" + "="*70)
+    print("STEP 4: TOP PREDICTIVE FEATURES")
+    print("="*70)
+    
     importance = model.get_feature_importance()
-    print("\nMost predictive features:")
+    print("\nMost important features for prediction:")
     for _, row in importance.head(10).iterrows():
         print(f"  {row['feature']}: {row['importance']:.4f}")
     
-    # Step 5: Sample predictions
+    # Step 5: Trading Signals
     print("\n" + "="*70)
-    print("STEP 5: SAMPLE PREDICTIONS")
+    print("STEP 5: TODAY'S TRADING SIGNALS")
     print("="*70)
     
-    for ticker in ['AAPL', 'MSFT', 'GOOGL']:
-        if ticker in df['ticker'].values:
-            show_prediction(model, df, ticker, feature_columns)
+    latest_date = df['date'].max()
+    latest_data = df[df['date'] == latest_date].copy()
+    
+    if len(latest_data) > 0:
+        predictions = model.predict(latest_data)
+        predictions = predictions.merge(
+            latest_data[['ticker', 'price_vs_sma_20', 'market_regime', 'rsi_14']],
+            on='ticker', how='left'
+        )
+        
+        strong_buys = predictions[
+            (predictions['predicted_direction'] == 1) & 
+            (predictions['confidence'] >= 0.54) &
+            (predictions['price_vs_sma_20'] > 0.01)
+        ].nlargest(3, 'confidence')
+        
+        strong_sells = predictions[
+            (predictions['predicted_direction'] == 0) & 
+            (predictions['confidence'] >= 0.54) &
+            (predictions['price_vs_sma_20'] < -0.01)
+        ].nlargest(2, 'confidence')
+        
+        if len(strong_buys) > 0:
+            print("\n🟢 STRONG BUY SIGNALS:")
+            for _, row in strong_buys.iterrows():
+                print(f"\n  {row['ticker']}: ${row['close']:.2f}")
+                print(f"    Confidence: {row['confidence']*100:.1f}%")
+                print(f"    Expected Return: {row['predicted_return']*100:+.3f}%")
+                print(f"    Trend: {row['price_vs_sma_20']*100:+.1f}% above 20-day MA")
+                print(f"    Signal: ✅ BUY - Strong upward momentum")
+        
+        if len(strong_sells) > 0:
+            print("\n🔴 STRONG SELL/SHORT SIGNALS:")
+            for _, row in strong_sells.iterrows():
+                print(f"\n  {row['ticker']}: ${row['close']:.2f}")
+                print(f"    Confidence: {row['confidence']*100:.1f}%")
+                print(f"    Expected Return: {row['predicted_return']*100:+.3f}%")
+                print(f"    Trend: {row['price_vs_sma_20']*100:.1f}% below 20-day MA")
+                print(f"    Signal: 🔻 SHORT - Downward momentum")
+        
+        if len(strong_buys) == 0 and len(strong_sells) == 0:
+            print("\n  No strong signals today - market conditions unclear")
+    
+    # Step 6: Backtest Results (at the end)
+    print_results(results)
     
     print("\n" + "="*70)
     print("COMPLETE")
